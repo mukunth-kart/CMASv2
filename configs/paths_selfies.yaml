@@ -1,0 +1,21 @@
+# Canonical paths for the SELFIES VAE pipeline.
+# Loaded via utils.utils.load_property_config by the walker drop-ins.
+
+# ---- VAE ------------------------------------------------------------
+selfies_vae_model_path: ./ckpts/chembl_v3/selfies_vae_weights.pt
+selfies_vocab_path:     ./vocab/selfies_vocab.json
+
+# ---- Oracles --------------------------------------------------------
+# Default: use the AKT1-encoded variant so the oracle's latent space
+# matches the walker's VAE. Flip to *_pretrain.pt for the broader-coverage
+# oracle without touching any code.
+admet_model_path:                 ./Models/AdmetClassifier/admet_predictor_selfies_pretrain.pt
+admet_model_path_pretrain_variant: ./Models/AdmetClassifier/admet_predictor_selfies_pretrain.pt
+admet_model_path_akt1_variant:     ./Models/AdmetClassifier/admet_predictor_selfies_akt1.pt
+
+activity_classifier_model_path: ./Models/ActivityClassifier/checkpoints/activity_classifier_mlp_selfies.pt
+
+# ---- Data (for reference / downstream scripts) ----------------------
+chembl_selfies_npy: ./data/ChemBL_Selfies.npy
+akt1_selfies_npy:   ./data/AKT1_Selfies.npy
+akt1_xlsx:          ./Models/ActivityClassifier/AKT1 CHEMBL.xlsx

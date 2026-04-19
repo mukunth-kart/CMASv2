@@ -1,0 +1,141 @@
+# ============================================================
+# SELFIES VAE — preprocess & train
+# ============================================================
+# python data/preprocess_selfies.py --input ./data/ChemBL_Smiles.txt --out_npy ./data/ChemBL_Selfies.npy --vocab_out ./vocab/selfies_vocab.json --build_vocab
+# python data/preprocess_selfies.py --input ./data/AKT1_smiles.txt  --out_npy ./data/AKT1_Selfies.npy  --vocab_out ./vocab/selfies_vocab.json
+# python train_selfies_vae.py --mode pretrain \
+#     --dataset ./data/ChemBL_Selfies.npy --vocab ./vocab/selfies_vocab.json \
+#     --save_dir ./ckpts/chembl_v2 \
+#     --epochs 300 --batch_size 2048 --lr 1e-3 \
+#     --kl_warmup 20 --kl_ramp 30 --max_beta 0.10 \
+#     --free_bits 0.5 --patience 30 --min_delta 0.001
+#
+# python train_selfies_vae.py --mode finetune \
+#     --dataset ./data/AKT1_Selfies.npy --vocab ./vocab/selfies_vocab.json \
+#     --weights ./ckpts/chembl_v2/selfies_vae_weights.pt \
+#     --save_dir ./ckpts/akt1_v2 \
+#     --epochs 150 --batch_size 256 --lr 1e-4 \
+#     --kl_warmup 5 --kl_ramp 15 --max_beta 0.10 \
+#     --free_bits 0.5 --patience 25 --min_delta 0.001
+
+# ============================================================
+# ADMET & Activity classifiers — build dataset & train (MultiHeadADMET)
+# ============================================================
+# python Models/AdmetClassifier/create_multitask_dataset_selfies.py --variant pretrain --vae ./ckpts/trained_selfies_vae/selfies_vae_weights.pt --vocab ./vocab/selfies_vocab.json
+# python Models/AdmetClassifier/create_multitask_dataset_selfies.py --variant akt1     --vae ./ckpts/trained_selfies_vae_akt1/selfies_vae_weights.pt --vocab ./vocab/selfies_vocab.json
+# python Models/ActivityClassifier/create_activity_latent_selfies.py --vae ./ckpts/trained_selfies_vae_akt1/selfies_vae_weights.pt --vocab ./vocab/selfies_vocab.json
+# python Models/AdmetClassifier/train_multitask_selfies.py --variant pretrain
+# python Models/AdmetClassifier/train_multitask_selfies.py --variant akt1
+# python Models/ActivityClassifier/train_mlp_selfies.py
+
+# ============================================================
+# Latent-space walks (baseline: PCGrad & NashMTL)
+# ============================================================
+# python src/pcgrad_only_selfies.py
+# python src/nash_mtl_walk_selfies.py
+
+# ============================================================
+# 7.1  GrowNet ADMET — one GrowNetOracle per task
+#      Reuses the latent dataset from create_multitask_dataset_selfies.py
+#      Outputs: ckpts/grownet_admet/{variant}/{task_name}.pt
+# ============================================================
+python Models/AdmetClassifier/train_multitask_grownet.py --variant pretrain
+python Models/AdmetClassifier/train_multitask_grownet.py --variant akt1
+
+# With explicit control (optional — auto-sizing applies by default):
+# python Models/AdmetClassifier/train_multitask_grownet.py --variant akt1 --max_learners 8
+# python Models/AdmetClassifier/train_multitask_grownet.py --variant akt1 --n_learners 6 --hidden_dim 256 --epochs 200
+
+# ============================================================
+# 7.2  Dynamic-Weight walks (deadlock-breaking priority scaling)
+#      --boost_factor  : weight for lagging tasks in near-deadlock (default 8.0)
+#      --deadlock_ratio: pass-rate threshold to trigger boost mode (default 0.75)
+# ============================================================
+python src/pcgrad_dynamic_selfies.py
+python src/nash_mtl_dynamic_selfies.py
+
+# Tune deadlock sensitivity:
+# python src/pcgrad_dynamic_selfies.py  --boost_factor 10.0 --deadlock_ratio 0.70
+# python src/nash_mtl_dynamic_selfies.py --boost_factor 10.0 --deadlock_ratio 0.70
+
+# ============================================================
+# 7.3  ε-Greedy walks (random exploration with probability ε)
+#      --epsilon     : probability of random step (default 0.10)
+#      --noise_scale : std of Gaussian perturbation (default 0.05)
+# ============================================================
+python src/pcgrad_epsilon_greedy_selfies.py
+python src/nash_epsilon_greedy_selfies.py
+
+# Tune exploration rate:
+# python src/pcgrad_epsilon_greedy_selfies.py  --epsilon 0.20 --noise_scale 0.10
+# python src/nash_epsilon_greedy_selfies.py    --epsilon 0.20 --noise_scale 0.10
+
+# ============================================================
+# 7.1  GrowNet — evaluate classifiers
+#      Requires ckpts/grownet_admet/{variant}/ from train_multitask_grownet.py
+# ============================================================
+python Models/AdmetClassifier/evaluate_grownet_selfies.py --variant pretrain
+python Models/AdmetClassifier/evaluate_grownet_selfies.py --variant akt1
+
+# ============================================================
+# 7.1  GrowNet — use in latent-space walks via GrowNetScoringEngine
+#
+#      In any walk script, replace the engine construction at the bottom with:
+#
+#          from utils.GrowNetADMETClassifier import GrowNetScoringEngine
+#          engine = GrowNetScoringEngine(
+#              activity_classifier_path=cfg["activity_classifier_model_path"],
+#              grownet_ckpt_dir="./ckpts/grownet_admet",
+#              variant="akt1",   # or "pretrain"
+#          )
+#
+#      Then pass engine to the walk function as usual — the function signature
+#      is unchanged. Combine freely with dynamic weights or epsilon-greedy:
+#
+#          pcgrad_walk(vae=vae, engine=engine, ...)            # baseline PCGrad
+#          pcgrad_dynamic_walk(vae=vae, engine=engine, ...)    # dynamic weights
+#          pcgrad_epsilon_walk(vae=vae, engine=engine, ...)    # ε-greedy
+#          nash_walk(vae=vae, engine=engine, ...)              # Nash-MTL
+#          nash_dynamic_walk(vae=vae, engine=engine, ...)
+#          nash_epsilon_walk(vae=vae, engine=engine, ...)
+# ============================================================
+
+# ============================================================
+# 7.1  Attention ADMET — train one AttentionOracle per task
+#      Reuses the latent dataset from create_multitask_dataset_selfies.py
+#      Outputs: ckpts/attention_admet/{variant}/{task_name}.pt
+# ============================================================
+python Models/AdmetClassifier/train_attention_admet.py --variant pretrain
+python Models/AdmetClassifier/train_attention_admet.py --variant akt1
+
+# Pin architecture (optional — auto-sizing applies by default):
+# python Models/AdmetClassifier/train_attention_admet.py --variant akt1 \
+#     --n_patches 8 --model_dim 64 --n_heads 4 --n_layers 2 --epochs 200
+
+# ============================================================
+# 7.1  Attention ADMET — evaluate classifiers
+# ============================================================
+python Models/AdmetClassifier/evaluate_attention_selfies.py --variant pretrain
+python Models/AdmetClassifier/evaluate_attention_selfies.py --variant akt1
+
+# ============================================================
+# 7.1  Attention ADMET — use in latent-space walks via AttentionScoringEngine
+#
+#      In any walk script, replace the engine construction at the bottom with:
+#
+#          from utils.AttentionADMETClassifier import AttentionScoringEngine
+#          engine = AttentionScoringEngine(
+#              activity_classifier_path=cfg["activity_classifier_model_path"],
+#              attention_ckpt_dir="./ckpts/attention_admet",
+#              variant="akt1",   # or "pretrain"
+#          )
+#
+#      Then pass engine to any walk function unchanged:
+#
+#          pcgrad_walk(vae=vae, engine=engine, ...)
+#          pcgrad_dynamic_walk(vae=vae, engine=engine, ...)
+#          pcgrad_epsilon_walk(vae=vae, engine=engine, ...)
+#          nash_walk(vae=vae, engine=engine, ...)
+#          nash_dynamic_walk(vae=vae, engine=engine, ...)
+#          nash_epsilon_walk(vae=vae, engine=engine, ...)
+# ============================================================
